@@ -1,7 +1,9 @@
 package pubsub
 
 // Class: how long an operation tolerates waiting while its executor gathers a
-// batch — a property of the Op, not of its caller; a hint the executor may use
+// batch — a property of the Op, not of its caller; a hint the executor may use.
+// A class only delays a result: throughput comes from many operations in flight (a
+// Client), not from Do per item in a loop.
 type Class int
 
 const (
@@ -18,8 +20,9 @@ type Job[T any] interface {
 	Class() Class
 	// Run: the operation, in the executor's env (its result stays in the job)
 	Run(env T)
-	// Done: the executor is done with the job (err: it failed it, e.g. a commit);
-	// delivers the result
+	// Done: the executor is done with the job — delivers the result. err: the
+	// executor failed it (a commit): a good result becomes err, an operation's own
+	// error stays its own.
 	Done(err error)
 	sealed()
 }

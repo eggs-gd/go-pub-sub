@@ -31,7 +31,8 @@ func (t *Topic[E]) Publish(e E) {
 	}
 }
 
-// Subscribe: fn is called with every event published from now on
+// Subscribe: fn is called with every event published from now on. A listener may
+// subscribe or close while it is called: a publish in progress keeps its own list.
 func (t *Topic[E]) Subscribe(fn func(E)) *Subscription[E] {
 	s := &Subscription[E]{topic: t, fn: fn}
 	t.mu.Lock()

@@ -12,20 +12,31 @@ type Result[R any] struct {
 	Err   error
 }
 
-// Command: an operation as a caller sees it, whatever runs it
+// Command: an operation as a caller sees it, whatever runs it — no env, no
+// executor.
+//
+// A result is delivered once the executor is done with the job (for a database:
+// after the commit), so whatever its receiver does next sees it.
 type Command[A, R any] interface {
 	// Submit: fire and forget — queued, its ID at once; its result goes only to
-	// the listeners of Done
+	// the listeners of Done. Never waits for the work, only for room in the
+	// executor's queue when it is full (backpressure).
 	Submit(arg A) ID
 	// Do: submit and wait for its own result
 	Do(arg A) (R, error)
 	// Client: submit and read its own results, at most window of them in flight
 	Client(window int) *Client[A, R]
-	// Done: every result of this operation, as an event — for anyone to listen to
+	// Done: every result of this operation (Do's and clients' too), as an event —
+	// for anyone to listen to without submitting. Its listeners are called on the
+	// executor's goroutine: as thin as any.
 	Done() *Topic[Result[R]]
 }
 
-// Op: one kind of operation — its function, its class, its executor
+// Op: one kind of operation — its function, its class, its executor. An Op is made
+// with the executor: whoever keeps the executor to itself decides which operations
+// exist, and hands others Commands (an argument for an operation that exists, no
+// code of their own). Within one process that is design discipline, not a security
+// boundary.
 type Op[T, A, R any] struct {
 	exec  Executor[T]
 	class Class

@@ -80,7 +80,7 @@ func Example_done() {
 	})
 	var heard []int
 	count.Done().Subscribe(func(r pubsub.Result[int]) { heard = append(heard, r.Value) }) // thin: on the executor's goroutine
-	count.Submit("a")                                                                    // fire and forget
+	count.Submit("a")                                                                     // fire and forget
 	count.Do("a")
 	s.close()
 	fmt.Println(heard)
