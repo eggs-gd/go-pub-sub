@@ -51,7 +51,7 @@ func Example() {
 	results := counter.Subscribe(16)
 	mine := map[pubsub.ID]string{}
 	for _, w := range []string{"Go", "chain", "go"} {
-		mine[counter.Submit(w)] = w // an ID at once; the work happens elsewhere
+		mine[counter.Submit(w)] = w // an ID once queued; the work happens elsewhere
 	}
 	n, _ := counter.Do("GO") // or wait for one result
 	s.close()

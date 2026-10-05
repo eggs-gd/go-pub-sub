@@ -1,5 +1,6 @@
 // Package pubsub: operations as topics. An operation kind is an Op: a caller
-// submits an argument and gets an ID at once; an Executor runs the operation (in
+// submits an argument and gets an ID once it is queued — never waiting for the
+// work; an Executor runs the operation (in
 // its own goroutine, its own transaction, batched as it likes) and, once it is
 // done, the result goes to every subscriber of the Op — each picks its own by ID.
 // Do submits and waits for its own result, for callers that may block.
@@ -57,7 +58,12 @@ type Job[T any] interface {
 }
 
 // Executor: who runs the jobs — a goroutine with a database transaction, a worker
-// pool, anything; Inline runs them at once
+// pool, anything.
+//
+// Enqueue queues the job and returns: it must not run the work (Submit returns
+// when Enqueue does). It may wait for room when its queue is full — backpressure,
+// the executor's choice: a bounded queue keeps a fast caller from piling up memory.
+// Inline is the exception, by design: it runs the job right there (tests).
 type Executor[T any] interface {
 	Enqueue(job Job[T])
 }
@@ -94,7 +100,8 @@ func New[T, A, R any](exec Executor[T], class Class, fn func(env T, arg A) (R, e
 	return &Op[T, A, R]{exec: exec, class: class, fn: fn, subs: map[*Sub[R]]struct{}{}}
 }
 
-// Submit: queued, returns its ID at once; the result goes to the subscribers
+// Submit: queued, returns its ID — never waiting for the work, only for room in the
+// executor's queue if it is full; the result goes to the subscribers
 func (o *Op[T, A, R]) Submit(arg A) ID {
 	id := ID(o.last.Add(1))
 	o.exec.Enqueue(&job[T, A, R]{op: o, id: id, arg: arg})
@@ -183,8 +190,9 @@ func (j *job[T, A, R]) Done(err error) {
 	}
 }
 
-// Inline: an executor that runs a job at once on the caller's goroutine, with the
-// zero env — for tests, and for operations with nothing to batch
+// Inline: an executor that runs a job right there, on the caller's goroutine, with
+// the zero env — Submit returns after the work: for tests, and for operations with
+// nothing to batch
 type Inline[T any] struct{}
 
 func (Inline[T]) Enqueue(j Job[T]) {

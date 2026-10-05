@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 )
 
 // writer: a test executor as a database writer would be — one goroutine runs the
@@ -169,4 +170,22 @@ func TestConcurrent(t *testing.T) {
 	if len(seen) != 500 || sub.Dropped() != 0 {
 		t.Errorf("delivered %d, dropped %d", len(seen), sub.Dropped())
 	}
+}
+
+// Submit returns before the work is done: the executor only queues it
+func TestSubmitDoesNotWaitForTheWork(t *testing.T) {
+	w := newWriter()
+	release := make(chan struct{})
+	op := New(w, Frame, func(string, int) (int, error) { <-release; return 1, nil })
+	sub := op.Subscribe(1)
+	submitted := make(chan ID)
+	go func() { submitted <- op.Submit(1) }()
+	select {
+	case <-submitted: // the work is still blocked: Submit did not wait for it
+	case <-time.After(time.Second):
+		t.Fatal("Submit waited for the work")
+	}
+	close(release)
+	<-sub.C
+	w.stop()
 }

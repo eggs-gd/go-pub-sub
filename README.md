@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/eggs-gd/go-pub-sub.svg)](https://pkg.go.dev/github.com/eggs-gd/go-pub-sub)
 
 **Operations as topics** for Go: a dispatcher where a caller submits work and gets an
-ID at once, an executor of your own runs the work where and how it likes (one
+ID as soon as it is queued, an executor of your own runs the work where and how it likes (one
 goroutine, a transaction, a batch), and the result is published to every subscriber
 of that kind of operation — each picks its own by ID. Typed with generics, standard
 library only.
@@ -19,7 +19,7 @@ count := pubsub.New(store, pubsub.Frame, func(data map[string]int, word string) 
 })
 
 results := count.Subscribe(16)    // every result of this operation
-id := count.Submit("go")          // queued: an ID at once
+id := count.Submit("go")          // queued: an ID, not waiting for the work
 n, err := count.Do("chain")       // or submit and wait for your own
 
 for r := range results.C {        // r.ID, r.Value, r.Err
@@ -45,11 +45,11 @@ the executor.
 |---|---|
 | `Op[T, A, R]` | one kind of operation: its function `fn(env T, arg A) (R, error)`, its class, its executor, its subscribers |
 | `Topic[A, R]` | an operation as a caller sees it: `Submit(A) ID`, `Subscribe(n) *Sub[R]`, `Do(A) (R, error)` — no env, no executor |
-| `Executor[T]` | yours: `Enqueue(Job[T])` — runs `job.Run(env)` where it likes, then `job.Done(err)` |
+| `Executor[T]` | yours: `Enqueue(Job[T])` queues the job and returns (it may wait for room: backpressure; it must not run the work); later it runs `job.Run(env)` where it likes, then `job.Done(err)` |
 | `Job[T]` | a submitted operation as the executor sees it: `Class()`, `Run(env)`, `Done(err)`; sealed |
 | `Result[R]` | `ID`, `Value`, `Err` |
 | `Class` | `Now`, `Frame`, `Idle`: how long an operation tolerates waiting while the executor gathers a batch |
-| `Inline[T]` | an executor that runs a job at once — tests, nothing to batch |
+| `Inline[T]` | an executor that runs a job right there, Submit returning after it — tests, nothing to batch |
 
 `T` — the executor's env (a `*sql.Tx`, a connection, a client) — is seen only by
 whoever makes the `Op` and by the executor. Hand callers a `Topic[A, R]`: they can
@@ -57,7 +57,11 @@ submit an argument for an operation that exists, nothing more.
 
 ## Rules
 
-- **Submit never waits** for the work: the ID comes back at once.
+- **Submit never waits for the work**: the ID comes back once the job is queued.
+  It may wait for **room**: an executor with a bounded queue makes a fast caller
+  wait while it is full (backpressure — an unbounded queue would only pile up
+  memory). The executor's `Enqueue` must not run the work itself; `Inline` is the
+  one exception, by design.
 - **Every result goes to every subscriber** of its `Op` — `Do`'s too; a subscriber
   keeps the IDs it submitted and picks its own.
 - **Delivery never blocks the executor.** A subscriber whose buffer is full misses
