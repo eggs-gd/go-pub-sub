@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// Each shape: Do gives what the operation gives; a subscriber gets one result per
-// operation, its ID and its error even when there is no value
+// Each shape: Do gives what the operation gives; a listener and a client get one
+// result per operation, its ID and its error even when there is no value
 func TestShapes(t *testing.T) {
 	var log []string
 	save := MessageOf(New(Inline[string]{}, Frame, func(_ string, s string) (None, error) {
@@ -19,23 +19,29 @@ func TestShapes(t *testing.T) {
 	count := SignalOf(New(Inline[string]{}, Frame, func(string, None) (int, error) { return len(log), nil }))
 	reset := TriggerOf(New(Inline[string]{}, Idle, func(string, None) (None, error) { log = nil; return None{}, nil }))
 
-	saved := save.Subscribe(4)
+	var saved []Result[None]
+	save.Done().Subscribe(func(r Result[None]) { saved = append(saved, r) })
 	if err := save.Do("a"); err != nil {
 		t.Fatal(err)
 	}
 	id := save.Submit("")
-	if r := <-saved.C; r.Err != nil { // Do's
-		t.Errorf("Do's result: %v", r.Err)
+	if len(saved) != 2 || saved[0].Err != nil || saved[1].ID != id || saved[1].Err == nil {
+		t.Errorf("message results: %+v", saved)
 	}
-	if r := <-saved.C; r.ID != id || r.Err == nil {
-		t.Errorf("a failed message: %+v", r)
+	counts := count.Client(1)
+	counts.Submit()
+	counts.Close()
+	for r := range counts.Results() {
+		if r.Value != 1 || r.Err != nil {
+			t.Errorf("count: %+v", r)
+		}
 	}
-	if n, err := count.Do(); n != 1 || err != nil {
-		t.Errorf("count: %d, %v", n, err)
-	}
-	resets := reset.Subscribe(1)
-	rid := reset.Submit()
-	if r := <-resets.C; r.ID != rid || r.Err != nil || len(log) != 0 {
-		t.Errorf("trigger: %+v, log %v", r, log)
+	resets := reset.Client(1)
+	rid := resets.Submit()
+	resets.Close()
+	for r := range resets.Results() {
+		if r.ID != rid || r.Err != nil || len(log) != 0 {
+			t.Errorf("trigger: %+v, log %v", r, log)
+		}
 	}
 }
