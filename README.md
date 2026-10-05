@@ -49,11 +49,34 @@ the executor.
 | `Job[T]` | a submitted operation as the executor sees it: `Class()`, `Run(env)`, `Done(err)`; sealed |
 | `Result[R]` | `ID`, `Value`, `Err` |
 | `Class` | `Now`, `Frame`, `Idle`: how long an operation tolerates waiting while the executor gathers a batch |
+| `None`, `Message[A]`, `Signal[R]`, `Trigger` | the shapes without an argument or a result — see "Shapes" |
 | `Inline[T]` | an executor that runs a job right there, Submit returning after it — tests, nothing to batch |
 
 `T` — the executor's env (a `*sql.Tx`, a connection, a client) — is seen only by
 whoever makes the `Op` and by the executor. Hand callers a `Topic[A, R]`: they can
 submit an argument for an operation that exists, nothing more.
+
+## Shapes
+
+Every `Op` takes one argument and gives one result — Go's generics have no variadic
+type parameters. Several arguments or results travel as one message (a struct); when
+there is none, `None` (`struct{}`) stands in. So that `None` never reaches a caller,
+an `Op` is handed out in the view of its shape:
+
+| argument | result | view | calls |
+|---|---|---|---|
+| yes | yes | `Topic[A, R]` (the `Op` itself) | `Submit(a)`, `Do(a) (R, error)` |
+| yes | no | `Message[A]` — `MessageOf(op)` | `Submit(a)`, `Do(a) error` |
+| no | yes | `Signal[R]` — `SignalOf(op)` | `Submit()`, `Do() (R, error)` |
+| no | no | `Trigger` — `TriggerOf(op)` | `Submit()`, `Do() error` |
+
+Without a result a subscriber still gets one `Result` per operation — its `ID` and
+its `Err` (nil: done): the end of the work is the news.
+
+```go
+del := pubsub.New(store, pubsub.Frame, func(db *sql.Tx, id int) (pubsub.None, error) { … })
+deleter := pubsub.MessageOf(del) // Message[int]: Submit(id), Do(id) error
+```
 
 ## Rules
 
