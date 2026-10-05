@@ -1,6 +1,9 @@
 package pubsub
 
-import "iter"
+import (
+	"iter"
+	"sync"
+)
 
 // Client: a caller's own line to an Op — it submits, and reads back only the
 // results of its own submissions (no one else's traffic in it, nothing of its own
@@ -12,6 +15,7 @@ type Client[A, R any] struct {
 	results chan Result[R]
 	room    chan struct{} // a token per result in flight or unread
 	closed  chan struct{}
+	mu      sync.RWMutex // a Submit in progress holds it shared, Close whole
 }
 
 func newClient[A, R any](window int, submit func(A, chan<- Result[R]) ID) *Client[A, R] {
@@ -27,6 +31,8 @@ func newClient[A, R any](window int, submit func(A, chan<- Result[R]) ID) *Clien
 // Submit: queued (waiting for room while window results are in flight or unread),
 // its ID — its result comes through Results. Submit on a closed client panics.
 func (c *Client[A, R]) Submit(arg A) ID {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	c.mustOpen()
 	c.room <- struct{}{}
 	return c.submit(arg, c.results)
@@ -34,6 +40,8 @@ func (c *Client[A, R]) Submit(arg A) ID {
 
 // TrySubmit: as Submit, or false right away when there is no room
 func (c *Client[A, R]) TrySubmit(arg A) (ID, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	c.mustOpen()
 	select {
 	case c.room <- struct{}{}:
@@ -71,8 +79,12 @@ func (c *Client[A, R]) Results() iter.Seq[Result[R]] {
 }
 
 // Close: no more submissions from this client (one after it panics); Results ends
-// once the results in flight are read
+// once the results in flight are read. It waits for the Submits in progress (one
+// waiting for room waits for a read): call it from the submitting side, not from
+// the loop over Results.
 func (c *Client[A, R]) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.isClosed() {
 		close(c.closed)
 	}

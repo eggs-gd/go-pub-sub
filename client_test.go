@@ -2,6 +2,8 @@ package pubsub
 
 import (
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -77,6 +79,37 @@ func TestClientFlow(t *testing.T) {
 	}
 	if want := n * (n - 1); sum != want {
 		t.Errorf("sum %d, want %d", sum, want)
+	}
+}
+
+// Close racing Submits from many goroutines: every submission that got in has its
+// result read, no more
+func TestClientCloseRace(t *testing.T) {
+	w := newWriter()
+	defer w.stop()
+	op := New(w, Frame, double)
+	for range 50 {
+		c := op.Client(2)
+		var submitted atomic.Int64
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				defer func() { recover() }() // a Submit after Close
+				for i := range 10 {
+					c.Submit(i)
+					submitted.Add(1)
+				}
+			})
+		}
+		wg.Go(c.Close)
+		read := int64(0)
+		for range c.Results() {
+			read++
+		}
+		wg.Wait()
+		if read != submitted.Load() {
+			t.Fatalf("read %d of %d submitted", read, submitted.Load())
+		}
 	}
 }
 
